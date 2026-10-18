@@ -8,6 +8,18 @@
 
 **Input**: User description: "DocuMind - Personal Document Intelligence Assistant. Problem: people struggle to find important information across contracts, bills, insurance policies, warranties and other documents. Requirements: (1) Documents: upload .pdf/.txt/.md files (multiple) or click 'Load sample documents' which loads 6 realistic bundled Indian-context sample documents … (2) Key information extraction per document … (3) Upcoming deadlines dashboard … (4) Ask questions across all documents in a chat UI … (5) Modes in the sidebar: Demo mode … and Live mode … Out of scope: user accounts, cloud storage, OCR of scanned images, email reminders."
 
+## Clarifications
+
+### Session 2026-10-18
+
+Defaults were chosen non-interactively for a single-user, local hackathon demo, as the user asked.
+
+- Q: Which extracted dates should go on the deadlines dashboard? Should start, issue and bill dates count, given that past start dates would show as "Overdue"? → A: Only forward-looking deadline roles go on the dashboard: due, renewal, expiry, end, and last-date/notice-by. Start, issue, bill and purchase dates appear only in the per-document summary.
+- Q: When a Live-mode call fails (bad key, rate limit, network), should the app only suggest Demo mode, or also answer that question in Demo mode automatically? → A: It answers that question automatically in Demo mode and shows the specific friendly failure notice. Live mode stays selected, so the next question tries Live again.
+- Q: When does key-information extraction run, and what happens in Live mode? → A: Demo extraction runs automatically once per document when the document is loaded. In Live mode, Claude extraction also runs once per document (on load, or when Live mode is first turned on for documents already loaded). Results are cached for the session per document and model. If Live extraction fails, that document keeps its Demo-mode results and a notice is shown.
+- Q: Should follow-up questions in the chat use earlier conversation turns as context? → A: No. Each question is answered on its own against the loaded documents. History is shown but not used as context.
+- Q: How many passages should a Demo-mode answer show? → A: Up to 3 of the highest-ranked passages that meet the relevance threshold, from any documents, grouped by document.
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - Load documents and ask a grounded question (Priority: P1)
@@ -33,7 +45,7 @@ A person opens DocuMind for the first time, clicks "Load sample documents" (or u
 
 ### User Story 2 - Upcoming deadlines dashboard (Priority: P2)
 
-The user wants to know what is coming up: insurance renewals, bill due dates, lease end, warranty expiry, subscription renewal. A dashboard lists every date found across all documents, sorted soonest first, showing days remaining, a colour status (overdue / within 30 days / later) and the source document.
+The user wants to know what is coming up: insurance renewals, bill due dates, lease end, warranty expiry, subscription renewal. A dashboard lists every deadline date (due, renewal, expiry, end, last-date/notice-by) found across all documents, sorted soonest first, showing days remaining, a colour status (overdue / within 30 days / later) and the source document.
 
 **Why this priority**: Missing a renewal or payment deadline is the most costly consequence of scattered documents; this view delivers value at a glance without any typing.
 
@@ -41,7 +53,7 @@ The user wants to know what is coming up: insurance renewals, bill due dates, le
 
 **Acceptance Scenarios**:
 
-1. **Given** sample documents are loaded, **When** the user opens the deadlines dashboard, **Then** all key dates from all documents are listed in ascending date order with a label (e.g. "Policy renewal", "Bill due"), the date, days remaining and the source document name.
+1. **Given** sample documents are loaded, **When** the user opens the deadlines dashboard, **Then** all deadline dates (due, renewal, expiry, end, last-date/notice-by) from all documents are listed in ascending date order, and start, issue, bill and purchase dates are not listed, with a label (e.g. "Policy renewal", "Bill due"), the date, days remaining and the source document name.
 2. **Given** a date is earlier than today, **When** it is displayed, **Then** it is marked "Overdue" (with negative/elapsed days shown) in the overdue colour.
 3. **Given** a date is between today and 30 days from today inclusive, **When** it is displayed, **Then** it is marked "Within 30 days" in the warning colour.
 4. **Given** a date is more than 30 days from today, **When** it is displayed, **Then** it is marked "Later" in the neutral colour.
@@ -70,19 +82,19 @@ For each document the user can see a structured summary: document type, parties,
 
 ### User Story 4 - Choose Demo or Live mode (Priority: P4)
 
-The sidebar always shows the current mode. Demo mode (default) works offline with no key. A user with an Anthropic API key can switch to Live mode, paste their key (or rely on a key already set in the environment), and choose a Claude model for higher-quality answers and extraction. If anything goes wrong, they get a friendly message and a suggestion to use Demo mode.
+The sidebar always shows the current mode. Demo mode (default) works offline with no key. A user with an Anthropic API key can switch to Live mode, paste their key (or rely on a key already set in the environment), and choose a Claude model for higher-quality answers and extraction. If anything goes wrong, they get a friendly message and that question is answered in Demo mode instead.
 
 **Why this priority**: Live mode improves answer quality but is optional; the product must be fully demonstrable without it.
 
-**Independent Test**: Start the app with no key — Demo mode is active and fully functional. Switch to Live mode with an invalid key and ask a question — a friendly "invalid API key" message appears with a suggestion to switch to Demo mode, and the app keeps working.
+**Independent Test**: Start the app with no key — Demo mode is active and fully functional. Switch to Live mode with an invalid key and ask a question — a friendly "invalid API key" message appears, the question is answered in Demo mode, and the app keeps working.
 
 **Acceptance Scenarios**:
 
 1. **Given** the app starts, **When** no choice has been made, **Then** Demo mode is active and the sidebar visibly shows "Demo mode".
 2. **Given** the user selects Live mode, **When** a key is present in the environment, **Then** Live mode can be used without pasting a key; otherwise the user is asked to paste a key in a masked input.
 3. **Given** Live mode is selected, **When** the user opens the model choice, **Then** they can pick claude-opus-5-5 (default), claude-sonnet-5-5 or claude-haiku-5-5.
-4. **Given** Live mode with an invalid key, **When** a question is asked, **Then** the app shows a friendly invalid-key message suggesting Demo mode, and does not crash.
-5. **Given** Live mode and a rate limit or network failure, **When** a question is asked, **Then** the app shows a friendly message specific to the failure (rate limited / cannot reach service) suggesting retrying later or using Demo mode.
+4. **Given** Live mode with an invalid key, **When** a question is asked, **Then** the app shows a friendly invalid-key message, answers that question in Demo mode, and does not crash.
+5. **Given** Live mode and a rate limit or network failure, **When** a question is asked, **Then** the app shows a friendly message specific to the failure (rate limited / cannot reach service), answers that question in Demo mode, and leaves Live mode selected so the next question retries Live.
 6. **Given** Live mode returns an answer whose quote does not appear in the cited document, **When** the answer is displayed, **Then** that quote is dropped, the user sees a notice that an unverifiable citation was removed, and if no verified citation remains the answer is "Not found in your documents".
 7. **Given** Live mode is waiting for a response, **When** the user looks at the screen, **Then** a visible progress indicator is shown.
 
@@ -100,6 +112,9 @@ The sidebar always shows the current mode. Demo mode (default) works offline wit
 - **Ambiguous dates** (e.g. "03/04/2026"): interpreted day-first (3 April 2026), consistent with Indian convention.
 - **Dates without a year or partial dates** (e.g. "the 5th of every month"): treated as a recurring obligation, not placed on the deadlines dashboard as a specific date.
 - **Deadline exactly today**: shown as "Within 30 days" with "Due today".
+- **Start, issue, bill or purchase dates** (e.g. a policy start date a year ago): shown in the document summary only, never on the deadlines dashboard, so they are never marked "Overdue".
+- **Live extraction fails for a document**: that document keeps its Demo-mode extraction results and a notice is shown; the other documents are not affected.
+- **Follow-up question that relies on an earlier turn** (e.g. "and when does it end?"): answered on its own against the documents, without using earlier turns; if nothing meets the threshold, the answer is "Not found in your documents".
 - **Very large document** (e.g. a 100-page policy): processed without freezing the app; answers still cite exact passages.
 - **Quote that differs only in whitespace/line breaks** from the document text: counts as verified; any other difference (wording, punctuation, numbers) causes it to be rejected.
 - **Live mode selected but no key anywhere**: user is prompted for a key; until one is provided, questions are answered in Demo mode with a visible notice.
@@ -114,7 +129,7 @@ The sidebar always shows the current mode. Demo mode (default) works offline wit
 - **FR-001**: Users MUST be able to upload one or more files at once in PDF, plain-text (.txt) or Markdown (.md) format.
 - **FR-002**: The app MUST provide a "Load sample documents" action that loads six bundled sample documents with Indian context: a health insurance policy, a car insurance policy, a rental/lease agreement, a phone/broadband bill, a laptop warranty card, and a gym or OTT subscription contract.
 - **FR-003**: Each sample document MUST contain concrete dates, amounts in INR, a policy/contract/account number, named parties and at least one obligation (e.g. notice period, payment due date).
-- **FR-004**: The sample set MUST include at least two deadlines falling within the next 30–60 days of the day the samples are loaded, at least one within the next 30 days, and at least one more than 60 days away, so all dashboard colour states except possibly overdue are visible; at least one sample date SHOULD be already past to show the overdue state.
+- **FR-004**: The sample set MUST include at least two deadlines falling within the next 30–60 days of the day the samples are loaded, at least one within the next 30 days, and at least one more than 60 days away, so all dashboard colour states except possibly overdue are visible; at least one sample deadline date (e.g. a previous bill's due date) SHOULD be already past to show the overdue state.
 - **FR-005**: The app MUST show a document list with each document's name, detected document type and file size, and a control to remove each document.
 - **FR-006**: Removing a document MUST remove it from Q&A, extraction results and the deadlines dashboard immediately.
 - **FR-007**: The app MUST reject unsupported, empty or unreadable files with a friendly message without affecting other documents.
@@ -125,21 +140,22 @@ The sidebar always shows the current mode. Demo mode (default) works offline wit
 - **FR-009**: For each document the app MUST extract, where present: parties; key dates labelled by role (start, end, renewal, due, expiry); amounts labelled by role (premium, rent, deposit, bill total, coverage/sum insured, fee); and obligations (e.g. notice period, payment due, claim intimation window).
 - **FR-010**: Every extracted item MUST be linked to the exact source passage it came from, viewable by the user, and that passage MUST be verified to appear in the document text (whitespace differences only tolerated); unverifiable items MUST be dropped and not shown.
 - **FR-011**: The app MUST recognise INR amounts in common Indian notations (₹, Rs., Rs, INR, "/-" suffix, lakh-style grouping such as 1,25,000) and day-first date formats.
+- **FR-011a**: Demo-mode extraction MUST run automatically once per document when it is loaded. In Live mode, Claude extraction MUST run once per document, either when it is loaded or when Live mode is first turned on for documents already loaded. Results MUST be cached for the session per document and model, so they are not recomputed on every screen refresh. If Live extraction fails for a document, that document MUST keep its Demo-mode results and a friendly notice MUST be shown.
 
 **Deadlines dashboard**
 
-- **FR-012**: The app MUST present a deadlines dashboard listing every specific calendar date extracted across all loaded documents, sorted ascending by date.
+- **FR-012**: The app MUST present a deadlines dashboard listing every specific calendar date with a deadline role (due, renewal, expiry, end, last-date/notice-by) extracted across all loaded documents, sorted ascending by date. Dates with other roles (start, issue, bill, purchase) MUST NOT appear on the dashboard; they appear only in the document summary.
 - **FR-013**: Each deadline row MUST show a label, the date, days remaining relative to today, the source document name, and access to the source passage.
 - **FR-014**: Each row MUST be colour-coded and labelled with a status: "Overdue" (date before today), "Within 30 days" (today through today + 30 days inclusive), or "Later" (more than 30 days away). Status MUST NOT rely on colour alone.
 
 **Question answering**
 
-- **FR-015**: Users MUST be able to ask free-text questions in a chat interface that searches across all loaded documents and keeps the conversation history visible for the session.
+- **FR-015**: Users MUST be able to ask free-text questions in a chat interface that searches across all loaded documents and keeps the conversation history visible for the session. Each question MUST be answered on its own: earlier turns are displayed but MUST NOT be used as context.
 - **FR-016**: Every answer MUST name at least one source document and include an exact quoted passage from it, shown in an expandable element next to the answer; when several documents are relevant, each MUST be listed with its own passage.
 - **FR-017**: Every quoted passage MUST be verified to appear in the cited document's text (ignoring whitespace differences only); any quote failing verification MUST be dropped and not shown, and the user MUST be shown a notice that an unverifiable citation was removed.
 - **FR-018**: If no verified citation supports an answer, the app MUST respond with exactly "Not found in your documents" and nothing else; it MUST never use general knowledge or guess.
 - **FR-019**: The chat MUST show four clickable suggested-question chips relevant to the sample documents, at least one of which asks for information that is NOT in the samples (demonstrating the "Not found in your documents" behaviour).
-- **FR-020**: In Demo mode, the app MUST rank document passages by keyword relevance to the question and MUST answer "Not found in your documents" when no passage meets a minimum relevance threshold.
+- **FR-020**: In Demo mode, the app MUST rank document passages by keyword relevance to the question and MUST answer "Not found in your documents" when no passage meets a minimum relevance threshold. A Demo-mode answer MUST show at most 3 of the highest-ranked passages that meet the threshold, from any documents, grouped by source document.
 
 **Modes and errors**
 
@@ -147,7 +163,7 @@ The sidebar always shows the current mode. Demo mode (default) works offline wit
 - **FR-022**: Demo mode MUST work fully offline with no API key, and MUST produce the same results for the same documents, question and date.
 - **FR-023**: Live mode MUST use Claude and accept a key either pasted by the user into a masked field or taken from the `ANTHROPIC_API_KEY` environment variable; the key MUST NOT be displayed back, saved to disk, logged or persisted beyond the session.
 - **FR-024**: Live mode MUST let the user choose the model from claude-opus-5-5 (default), claude-sonnet-5-5 and claude-haiku-5-5.
-- **FR-025**: Live-mode failures MUST produce a friendly, specific message for invalid/missing key, rate limiting and network/service unavailability, each suggesting Demo mode; the app MUST remain usable and MUST NOT crash or show raw error traces.
+- **FR-025**: Live-mode failures MUST produce a friendly, specific message for invalid/missing key, rate limiting and network/service unavailability. The question that failed MUST then be answered automatically in Demo mode, with the answer visibly labelled as a Demo-mode answer. Live mode MUST stay selected so the next question tries Live again. The app MUST remain usable and MUST NOT crash or show raw error traces.
 - **FR-026**: Live mode MUST show a visible progress indicator while waiting for a response.
 - **FR-027**: In Live mode, document content MUST be sent only to the Claude service; in Demo mode, no document content leaves the user's machine.
 
@@ -156,8 +172,8 @@ The sidebar always shows the current mode. Demo mode (default) works offline wit
 - **Document**: A loaded file. Attributes: name, source (uploaded or sample), size, detected type, extracted text, readability status.
 - **Passage (chunk)**: A contiguous section of a document's text used for retrieval and citation; belongs to one document.
 - **Extracted Item**: A typed fact from a document — category (party, date, amount, obligation), role label (e.g. "renewal date", "premium"), normalised value (date or INR amount where applicable), and a verified source passage.
-- **Deadline**: A dated Extracted Item shown on the dashboard, with days remaining and status (Overdue / Within 30 days / Later) computed relative to today.
-- **Answer**: The response to a question — answer text (or "Not found in your documents"), zero or more verified Citations, and any notices (e.g. "unverifiable citation removed").
+- **Deadline**: A dated Extracted Item with a deadline role (due, renewal, expiry, end, last-date/notice-by) shown on the dashboard, with days remaining and status (Overdue / Within 30 days / Later) computed relative to today.
+- **Answer**: The response to a question — answer text (or "Not found in your documents"), zero or more verified Citations, the mode that produced it (Demo or Live), and any notices (e.g. "unverifiable citation removed", "Live mode failed — answered in Demo mode").
 - **Citation**: A reference from an Answer to a Document with the exact quoted passage; valid only if verified against the document text.
 - **Session Settings**: Current mode (Demo/Live), chosen model, and whether a key is available (never the key's value in any visible form).
 
