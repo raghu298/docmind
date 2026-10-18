@@ -95,6 +95,11 @@ with st.sidebar:
             "- Nothing is stored — documents live only in this browser session.")
 
 
+def quote(text: str) -> str:
+    """Markdown blockquote that keeps every line of a multi-line passage inside the quote."""
+    return "\n".join("> " + line for line in text.strip().splitlines())
+
+
 def live_allowed() -> bool:
     if settings.mode != "live" or not settings.has_key:
         return True
@@ -116,7 +121,10 @@ st.caption("Personal document intelligence — contracts, bills, insurance, warr
 
 docs = engine.list_documents(store)
 if not docs:
-    st.info("👈 Load the sample documents or upload your own to get started.")
+    st.info("Load the sample documents or upload your own (in the sidebar) to get started.")
+    if st.button("📥 Load sample documents", key="load-main"):
+        engine.load_samples(store, today)
+        st.rerun()
     st.stop()
 
 dls = engine.deadlines(store, settings, today)
@@ -126,9 +134,22 @@ m2.metric("Due within 30 days", sum(d.status == "within_30" for d in dls))
 m3.metric("Overdue", sum(d.status == "overdue" for d in dls))
 m4.metric("Facts extracted", engine.fact_count(store, settings))
 
-view = st.segmented_control("View", ["Documents", "Deadlines", "Ask"], default=ss.view,
-                            label_visibility="collapsed")
-ss.view = view or ss.view
+# A stable widget key: passing default=ss.view made Streamlit treat the control as a new widget
+# whenever the view changed, so every switch after the first needed two clicks. Clicking the active
+# option deselects it, so the last real choice is kept in ss.view.
+if ss.get("view_sel") is None:
+    ss.view_sel = ss.view
+
+
+def _on_view() -> None:
+    if ss.view_sel is None:
+        ss.view_sel = ss.view
+    else:
+        ss.view = ss.view_sel
+
+
+st.segmented_control("View", ["Documents", "Deadlines", "Ask"], key="view_sel", on_change=_on_view,
+                     label_visibility="collapsed")
 
 # ------------------------------------------------------------------ Documents
 if ss.view == "Documents":
@@ -160,7 +181,7 @@ if ss.view == "Documents":
                 for f in facts:
                     val = engine.format_inr(f.amount_inr) if f.amount_inr is not None else f.value
                     with col.expander(f"{f.label}: {val}"[:80]):
-                        st.markdown(f"> {f.source_quote}")
+                        st.markdown(quote(f.source_quote))
 
 # ------------------------------------------------------------------ Deadlines
 elif ss.view == "Deadlines":
@@ -175,12 +196,20 @@ elif ss.view == "Deadlines":
             b.markdown(f"**{d.date.strftime('%d %b %Y')}**  \n{engine.days_text(d.days_remaining)}")
             c.markdown(f"`{d.status_text}`")
             with st.expander("Source passage"):
-                st.markdown(f"> {d.source_quote}")
+                st.markdown(quote(d.source_quote))
 
 # ------------------------------------------------------------------ Ask
 else:
     st.subheader("Ask your documents")
-    chips = st.pills("Try:", SUGGESTED_QUESTIONS, selection_mode="single", key=f"chips-{len(ss.chat)}")
+    chips = None
+    if any(d.source == "sample" for d in docs):
+        chips = st.pills("Try:", SUGGESTED_QUESTIONS, selection_mode="single", key=f"chips-{len(ss.chat)}")
+    else:
+        st.caption("Ask about what is in your documents, e.g. *When does my policy expire?* or "
+                   "*What is the cancellation rule?*")
+    if settings.mode != "live":
+        st.caption("Demo mode finds the best matching passage by keywords. For written answers to "
+                   "questions about long documents, switch to **Live (Claude)**.")
     question = st.chat_input("Ask anything about your documents...")
     question = question or chips
     if question:
@@ -202,9 +231,13 @@ else:
                 st.warning(f"🚫 **{NOT_FOUND}** — DocuMind does not guess.")
             else:
                 st.write(ans.text)
+                by_doc: dict[str, list[str]] = {}
                 for c in ans.citations:
-                    with st.expander(f"📎 {c.doc_name}"):
-                        st.markdown(f"> {c.quote}")
+                    by_doc.setdefault(c.doc_name, []).append(c.quote)
+                for i, (name, quotes) in enumerate(by_doc.items()):
+                    label = f"📎 {name}" + (f" ({len(quotes)} passages)" if len(quotes) > 1 else "")
+                    with st.expander(label, expanded=(ans.mode == "demo" and i == 0)):
+                        st.markdown("\n\n".join(quote(q) for q in quotes))
             tag = "Claude" if ans.mode == "live" else "Demo mode"
             st.caption(f"Answered by {tag}" + (" (fallback)" if ans.fell_back else ""))
             for n in ans.notices:

@@ -42,7 +42,7 @@ uv run pytest -q
 
 ## 2-minute demo script
 1. **Problem (15 s):** "Important dates and amounts are buried in PDFs: renewals get missed, deposits forgotten."
-2. **Load sample documents (15 s):** show the metrics (3 due within 30 days, 1 overdue).
+2. **Load sample documents (15 s):** show the metrics (2 due within 30 days, 1 overdue).
 3. **Deadlines (20 s):** the overdue broadband bill and the health-insurance renewal in 25 days, each with its source passage.
 4. **Documents (20 s):** extracted parties, dates, ₹ amounts and obligations, each linked to its passage.
 5. **Ask (40 s):** "What is the notice period in my rental agreement?" → cited answer. Then

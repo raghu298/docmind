@@ -165,10 +165,7 @@ def list_documents(store: DocumentStore) -> list[Document]:
 
 # --------------------------------------------------------------------------- live client
 def _default_client_factory(settings: Settings) -> Any:
-    import anthropic
-
-    return anthropic.Anthropic(api_key=settings.api_key.get_secret_value(),  # type: ignore[union-attr]
-                               max_retries=0, timeout=60)
+    return llm_engine.make_client(settings.api_key.get_secret_value())  # type: ignore[union-attr]
 
 
 def _live_ready(settings: Settings) -> bool:
@@ -258,7 +255,8 @@ def ensure_live_summaries(store: DocumentStore, settings: Settings, *,
             msg = f"{failed[0]} Live extraction failed for {name} — showing Demo results."
             notices.append(msg)
             # Auth/connection problems will fail for every doc: stop early, mark the rest.
-            if failed[0] not in (GENERIC_LIVE_ERROR,) and not failed[0].startswith("Claude returned"):
+            if failed[0] not in (GENERIC_LIVE_ERROR, llm_engine.LiveTimeoutError.user_message) \
+                    and not failed[0].startswith("Claude returned"):
                 for rest in names[names.index(name) + 1:]:
                     rid = store.docs[rest].id
                     store.live_failures.setdefault((rid, settings.model), list(failed))
@@ -286,34 +284,113 @@ def fact_count(store: DocumentStore, settings: Settings) -> int:
 
 
 # --------------------------------------------------------------------------- ask
-# split on line breaks or sentence ends, but not after abbreviations like "Rs." / "No."
-_SENT_SPLIT = re.compile(r"(?<!\bRs)(?<!\bNo)(?<!\bMr)(?<=[.!?])\s+(?=[A-Z])|\n+")
+# split on sentence ends, but not after abbreviations like "Rs." / "No." / "Mr."
+_SENT_SPLIT = re.compile(r"(?<=[.!?])(?<!\bRs\.)(?<!\bNo\.)(?<!\bMr\.)(?<!\bMs\.)(?<!\bDr\.)(?<!\bCo\.)"
+                         r"(?<!\bMrs\.)(?<!\bPvt\.)\s+(?=[A-Z])")
+# a line ending mid-sentence ("... between Mr. Suresh Kumar (Landlord) and") continues on the next
+_CONTINUES = re.compile(r"(?:,|\b[a-z]+)\s*$")
+_AMOUNT = re.compile(r"₹|\bRs\.?|\bINR\b", re.I)
+_DATE = re.compile(r"\b\d{1,2}[/.-]\d{1,2}[/.-]\d{4}\b|\b\d{1,2}\s+[A-Z][a-z]+\s+\d{4}\b")
+_ASKS_AMOUNT = re.compile(r"\bhow much\b|\bamount\b|\bcost|\bprice|\bfees?\b|\bcharges?\b|\bowe\b|\bpay\b"
+                          r"|\bpremium\b|\brent\b|\bdeposit\b|\bidv\b|\bvalue\b|\btotal\b", re.I)
+_ASKS_DATE = re.compile(r"\bwhen\b|\bdate\b|\bdue\b|\bexpir|\bdeadline\b", re.I)
+_ASKS_WHO = re.compile(r"^\s*who\b|\bname of\b", re.I)
 
 
-def _best_sentence(text: str, question: str) -> str:
-    """The sentence/line of `text` sharing the most query terms (verbatim slice of the chunk)."""
-    q = set(tokenize(question))
-    best, best_score = "", -1
-    for sent in _SENT_SPLIT.split(text):
-        sent = sent.strip()
-        if not sent:
+def _lines(text: str) -> list[str]:
+    """Lines of `text`, with hard-wrapped lines of one sentence joined back together."""
+    out: list[str] = []
+    for line in text.split("\n"):
+        line = line.strip()
+        if not line:
             continue
-        score = len(q & set(tokenize(sent)))
-        if score > best_score:
-            best, best_score = sent, score
-    return best or text.strip()
+        if out and ":" not in out[-1].split(".")[-1] and _CONTINUES.search(out[-1]):
+            out[-1] = f"{out[-1]} {line}"
+        else:
+            out.append(line)
+    return out
+
+
+def _sentences(text: str) -> list[str]:
+    return [s.strip() for line in _lines(text) for s in _SENT_SPLIT.split(line) if s.strip()]
+
+
+# Question words that documents usually phrase differently ("when does it end" vs "Term: ... to <date>").
+# Ordered: the most common document wording first.
+_SYNONYMS: dict[str, tuple[str, ...]] = {
+    "end": ("term", "till", "until", "expir"),
+    "expir": ("valid", "till", "until", "end"),
+    "cost": ("fee", "price", "charg"),
+    "price": ("fee", "cost", "charg"),
+    "owe": ("due", "total", "payabl"),
+}
+
+
+def _expand(q: set[str]) -> set[str]:
+    return q | {s for t in q for s in _SYNONYMS.get(t, ())}
+
+
+def _overlap(q: set[str], sent: str) -> float:
+    """Query terms found in `sent`; a shared 5-letter prefix (cancel/cancellation) counts as half."""
+    toks = set(tokenize(sent))
+    exact = q & toks
+    near = {t for t in q - exact if len(t) >= 5 and any(s[:5] == t[:5] for s in toks if len(s) >= 5)}
+    return len(exact) + 0.5 * len(near)
 
 
 def _line_score(sent: str, question: str) -> tuple[float, int]:
-    """Query-term overlap, plus a bonus for lines carrying a date or amount (the usual answer)."""
-    overlap = len(set(tokenize(question)) & set(tokenize(sent)))
-    has_value = bool(re.search(r"\d", sent))
-    return (overlap + (1.5 if has_value else 0), -len(sent))
+    """Query-term overlap, plus a bonus when the line holds the kind of value the question asks for:
+    an amount for "how much", a date for "when", a "Label: value" line for "who"."""
+    q = _expand(set(tokenize(question)))
+    score = _overlap(q, sent)
+    if _ASKS_AMOUNT.search(question) and _AMOUNT.search(sent):
+        score += 1.5
+    elif _ASKS_DATE.search(question) and _DATE.search(sent):
+        score += 1.5
+    elif _ASKS_WHO.search(question):
+        label = sent.split(":", 1)[0] if ":" in sent else ""
+        if label and q & set(tokenize(label)):
+            score += 1.5
+    elif re.search(r"\d", sent):
+        score += 0.5
+    label = sent.split(":", 1)[0] if 0 < sent.find(":") <= 40 else ""
+    label_terms = set(tokenize(label))
+    if label_terms and label_terms <= q:          # "Plan: ..." answers "what is my plan"
+        score += 1.0
+    if sent.isupper() and not re.search(r"\d", sent):  # an all-caps title, never the answer
+        score -= 2.0
+    return (score, -len(sent))
+
+
+def _best_sentence(text: str, question: str) -> str:
+    """The sentence of `text` that best answers `question` (verbatim apart from line wrapping)."""
+    sents = _sentences(text)
+    return max(sents, key=lambda s: _line_score(s, question)) if sents else text.strip()
 
 
 def _demo_answer(store: DocumentStore, question: str) -> Answer:
     index = store.index
     hits = index.search(question, k=3) if index is not None else []
+    if not hits and index is not None:
+        # retry with document wording for a question-only word ("owe" -> "due"), one swap at a time,
+        # but never when another question word is absent from every document ("passport expiry"):
+        # swapping would then match on the remaining words alone and invent an answer
+        terms = list(dict.fromkeys(tokenize(question)))
+        if not all(index.has_term(t) for t in terms if t not in _SYNONYMS):
+            terms = []
+        for i, term in enumerate(terms):
+            for alt in _SYNONYMS.get(term, ()):
+                hits = index.search(" ".join([*terms[:i], alt, *terms[i + 1:]]), k=3)
+                if hits:
+                    break
+            if hits:
+                break
+    # A question that names a document ("my car ...", "broadband ...") is answered from documents
+    # with that word in their name only, so "car service" can't be answered from a broadband bill.
+    q_terms = set(tokenize(question))
+    named = {d: set(tokenize(d.replace("_", " "))) & q_terms for d in store.docs}
+    if any(named.values()):
+        hits = [h for h in hits if named.get(h[0].doc_name)]
     if not hits:
         return Answer.not_found(question, "demo")
     order: list[str] = []
@@ -325,9 +402,9 @@ def _demo_answer(store: DocumentStore, question: str) -> Answer:
         grouped[chunk.doc_name].append(chunk)
     citations = [Citation(doc_name=c.doc_name, doc_id=c.doc_id, quote=c.text, start=c.start)
                  for name in order for c in grouped[name]]
-    # pick the best line across all hit chunks, so a title line can't win over the real answer
-    text = max((_best_sentence(c.text, question) for c, _ in hits[:3]),
-               key=lambda sent: _line_score(sent, question))
+    # pick the best sentence across all hit chunks, so a title line can't win over the real answer
+    text = max((s for c, _ in hits[:3] for s in _sentences(c.text)),
+               key=lambda sent: _line_score(sent, question), default=hits[0][0].text.strip())
     return Answer(question=question, text=text, found=True, citations=citations, mode="demo")
 
 

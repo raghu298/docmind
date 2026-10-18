@@ -86,6 +86,11 @@ class LiveConnectionError(LiveError):
     user_message = "Couldn't reach the Claude service. Check your internet connection."
 
 
+class LiveTimeoutError(LiveConnectionError):
+    user_message = ("Claude took too long to respond. Try again, pick a faster model, "
+                    "or ask about fewer documents.")
+
+
 class LiveServiceError(LiveError):
     user_message = "The Claude service returned an error. Please try again later."
 
@@ -99,9 +104,14 @@ class LiveRefusalError(LiveError):
 
 
 # ---------------------------------------------------------------- helpers
+# Thinking is always on for these models and whole documents go in the prompt, so a long
+# answer can take well over a minute. No retries: a failure falls back to Demo mode instead.
+REQUEST_TIMEOUT = 180
+
+
 def make_client(api_key: str) -> "anthropic.Anthropic":
     """Default client factory. The key is passed straight to the SDK and not kept anywhere else."""
-    return anthropic.Anthropic(api_key=api_key, max_retries=0, timeout=60)
+    return anthropic.Anthropic(api_key=api_key, max_retries=0, timeout=REQUEST_TIMEOUT)
 
 
 def estimate_tokens(text: str) -> int:
@@ -133,7 +143,9 @@ def _call(client: Any, model: str, system: str, user_content: str, output_format
         raise LivePermissionError() from None
     except anthropic.RateLimitError:
         raise LiveRateLimitError() from None
-    except anthropic.APIConnectionError:  # includes APITimeoutError
+    except anthropic.APITimeoutError:  # subclass of APIConnectionError: catch it first
+        raise LiveTimeoutError() from None
+    except anthropic.APIConnectionError:
         raise LiveConnectionError() from None
     except anthropic.APIStatusError:
         raise LiveServiceError() from None
@@ -278,6 +290,6 @@ def extract_live(client: Any, model: str, doc: Document) -> DocumentSummary:
 __all__ = [
     "MODELS", "DEFAULT_MODEL", "TOKEN_BUDGET", "ANSWER_SYSTEM", "EXTRACT_SYSTEM",
     "LiveError", "LiveAuthError", "LivePermissionError", "LiveRateLimitError",
-    "LiveConnectionError", "LiveServiceError", "LiveMalformedError", "LiveRefusalError",
+    "LiveConnectionError", "LiveTimeoutError", "LiveServiceError", "LiveMalformedError", "LiveRefusalError",
     "make_client", "estimate_tokens", "build_answer_content", "answer_live", "extract_live",
 ]

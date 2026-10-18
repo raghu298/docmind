@@ -126,7 +126,7 @@ def test_found_false_is_not_found():
     (status_error(anthropic.PermissionDeniedError, 403), le.LivePermissionError),
     (status_error(anthropic.RateLimitError, 429), le.LiveRateLimitError),
     (anthropic.APIConnectionError(message=SECRET, request=REQ), le.LiveConnectionError),
-    (anthropic.APITimeoutError(request=REQ), le.LiveConnectionError),
+    (anthropic.APITimeoutError(request=REQ), le.LiveTimeoutError),
     (status_error(anthropic.InternalServerError, 500), le.LiveServiceError),
     (status_error(anthropic.APIStatusError, 529), le.LiveServiceError),
 ])
@@ -191,7 +191,7 @@ def test_extract_live_truncates_large_doc():
 
 def test_make_client_settings():
     c = le.make_client(SECRET)
-    assert c.max_retries == 0 and c.timeout == 60
+    assert c.max_retries == 0 and c.timeout == le.REQUEST_TIMEOUT
 
 
 def test_models():

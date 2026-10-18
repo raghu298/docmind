@@ -28,6 +28,7 @@ shall should may might must i me my mine we our ours you your yours he she it it
 their this that these those there here what when where which who whom whose why how
 much many any some all each every no not nor so than too very just also only own same
 please tell show give find get know let s t
+long allow allowed
 """.split())
 
 _TOKEN_RE = re.compile(r"[a-z0-9₹]+")
@@ -117,6 +118,10 @@ class BM25Index:
     @property
     def n(self) -> int:
         return len(self.chunks)
+
+    def has_term(self, term: str) -> bool:
+        """True when `term` (already tokenized) occurs in at least one chunk."""
+        return self._df.get(term, 0) > 0
 
     def idf(self, term: str) -> float:
         df = self._df.get(term, 0)

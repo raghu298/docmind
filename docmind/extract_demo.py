@@ -144,6 +144,7 @@ _DATE_CUES: list[tuple[str, re.Pattern[str]]] = [
                        r"|\btill\b|\buntil\b|\bupto\b", re.I)),
     ("last_date", re.compile(r"last date|notice by|on or before|no later than|latest by|deadline", re.I)),
     ("start", re.compile(r"start\w*|commenc\w*|effective|\bfrom\b|w\.e\.f|joining date|\bjoined\b"
+                         r"|(?<!billing )(?<!bill )\bperiod(?: of insurance)?\b"
                          r"|inception|activation|activated", re.I)),
     ("issue", re.compile(r"issued?\b|issue date|date of issue|\bdated\b", re.I)),
     ("bill", re.compile(r"bill(?:ing)? date|statement date|bill(?:ing)? period|bill generated", re.I)),
@@ -232,7 +233,8 @@ _AMT_CUES: list[tuple[str, re.Pattern[str]]] = [
     ("deposit", re.compile(r"deposit|advance", re.I)),
     ("rent", re.compile(r"\brent(?:al)?\b", re.I)),
     ("bill_total", re.compile(r"total|amount payable|amount due|payable|balance|outstanding|\bdue\b", re.I)),
-    ("coverage", re.compile(r"sum insured|coverage|\bcover\b|\bidv\b|insured declared value", re.I)),
+    ("coverage", re.compile(r"room rent(?: limit)?|(?<!of the )sum insured|coverage|\bcover\b|\bidv\b"
+                            r"|insured declared value", re.I)),
     ("fee", re.compile(r"\bfees?\b|charges?|subscription|\bplan\b|price|\bcost\b|membership|tariff", re.I)),
 ]
 _AMT_LABEL = {"premium": "Premium", "rent": "Rent", "deposit": "Security deposit",
@@ -255,6 +257,8 @@ def _amount_role(text: str, start: int, end: int, s_start: int, s_end: int,
 def _amount_label(role: str, cue: str, sentence: str) -> str:
     if role == "rent" and re.search(r"month|p\.?m\.?\b|/\s*month", sentence, re.I):
         return "Monthly rent"
+    if role == "coverage" and cue.lower().startswith("room rent"):
+        return "Room rent limit"
     if role == "coverage" and cue.lower() == "idv":
         return "IDV (insured value)"
     if role == "premium" and re.search(r"annual|yearly|per annum", sentence, re.I):
