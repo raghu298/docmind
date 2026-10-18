@@ -125,6 +125,20 @@ day, and less code to review.
 **Rationale**: The app is judged in a short live demo. Anything slow, cluttered, or unclear
 costs points.
 
+### VIII. Retrieval Strategy — Long-Context First, No Vector Store
+
+- **Live mode** MUST send the full text of all loaded documents to Claude (long-context
+  grounding) whenever the combined text is within a budget of ~150,000 tokens (estimate
+  as characters / 4). Only above that budget does Live mode fall back to sending the top
+  BM25-retrieved chunks.
+- **Demo mode** uses pure-Python BM25 retrieval over paragraph chunks with a relevance
+  threshold for "Not found in your documents".
+- No embeddings, vector databases (FAISS, Chroma, pgvector, etc.) or local ML models.
+  Rationale: a personal document set is small enough to fit in context, exact terms
+  (policy numbers, amounts, dates) suit keyword search, and the app must stay offline and
+  dependency-light. Hybrid BM25 + vector search is documented as a future scaling step.
+- Citation verification (Principle I) applies identically in both strategies.
+
 ## Technology & Security Constraints
 
 - **Language/Runtime**: Python 3.10 or newer.
@@ -164,4 +178,4 @@ costs points.
   Principles I (grounding) and III (secrets) explicitly. Any approved exception MUST be
   recorded in the plan's Complexity Tracking section.
 
-**Version**: 1.0.0 | **Ratified**: 2026-10-18 | **Last Amended**: 2026-10-18
+**Version**: 1.1.0 | **Ratified**: 2026-10-18 | **Last Amended**: 2026-10-18
