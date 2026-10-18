@@ -1,0 +1,17 @@
+[project]
+name = "docmind"
+version = "0.1.0"
+description = "DocuMind - personal document intelligence assistant (Streamlit + Claude)"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = ["streamlit>=1.40", "anthropic>=1.0", "pydantic>=2.7", "pypdf>=5.0"]
+
+[dependency-groups]
+dev = ["pytest"]
+
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
